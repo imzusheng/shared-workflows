@@ -27,14 +27,16 @@ on:
         description: '保留备份数量'
         type: string
         default: '3'
+      deploy-path:
+        description: '服务器部署目标目录（每个仓库必须单独配置，为空则跳过部署）'
+        type: string
+        default: ''
     secrets:
       DEPLOY_HOST:
         required: true
       DEPLOY_USER:
         required: true
       DEPLOY_KEY:
-        required: true
-      DEPLOY_PATH:
         required: true
       DEPLOY_PORT:
         required: false
@@ -73,17 +75,18 @@ jobs:
       - name: 构建
         run: ${{ inputs.build-command }}
 
+      - name: 跳过部署（deploy-path 未配置）
+        if: inputs.deploy-path == ''
+        run: |
+          echo "::warning::deploy-path 未配置，跳过部署步骤。请在调用方 workflow 的 with.deploy-path 中指定服务器目标目录。"
+
       - name: 准备 SSH 密钥
+        if: inputs.deploy-path != ''
         env:
           DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
         run: |
-          if [ -z "$DEPLOY_HOST" ] || [ -z "${{ secrets.DEPLOY_USER }}" ] || [ -z "${{ secrets.DEPLOY_PATH }}" ] || [ -z "$DEPLOY_KEY" ]; then
-            echo "缺少部署所需的 secrets，已中止。"
-            exit 1
-          fi
-
           install -m 700 -d ~/.ssh
           printf '%s\n' "$DEPLOY_KEY" | tr -d '\r' > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
@@ -99,10 +102,11 @@ jobs:
           fi
 
       - name: 通过 rsync 部署到服务器
+        if: inputs.deploy-path != ''
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_PATH: ${{ inputs.deploy-path }}
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
           DIST_DIR: ${{ inputs.dist-dir }}
           BACKUP_COUNT: ${{ inputs.backup-count }}
