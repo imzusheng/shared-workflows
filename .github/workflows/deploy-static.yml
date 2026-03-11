@@ -1,0 +1,145 @@
+name: Deploy Static Site (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js 版本'
+        type: string
+        default: '20'
+      package-manager:
+        description: '包管理器（npm/yarn/pnpm）'
+        type: string
+        default: 'npm'
+      build-command:
+        description: '构建命令'
+        type: string
+        default: 'npm run build'
+      lint-command:
+        description: 'Lint 命令（为空则跳过）'
+        type: string
+        default: ''
+      dist-dir:
+        description: '构建产物目录'
+        type: string
+        default: 'dist'
+      backup-count:
+        description: '保留备份数量'
+        type: string
+        default: '3'
+    secrets:
+      DEPLOY_HOST:
+        required: true
+      DEPLOY_USER:
+        required: true
+      DEPLOY_KEY:
+        required: true
+      DEPLOY_PATH:
+        required: true
+      DEPLOY_PORT:
+        required: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout 代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js ${{ inputs.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ inputs.package-manager }}
+
+      - name: 安装依赖（npm）
+        if: inputs.package-manager == 'npm'
+        run: npm ci
+
+      - name: 安装依赖（yarn）
+        if: inputs.package-manager == 'yarn'
+        run: yarn install --frozen-lockfile
+
+      - name: 安装依赖（pnpm）
+        if: inputs.package-manager == 'pnpm'
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Lint
+        if: inputs.lint-command != ''
+        run: ${{ inputs.lint-command }}
+
+      - name: 构建
+        run: ${{ inputs.build-command }}
+
+      - name: 准备 SSH 密钥
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          if [ -z "$DEPLOY_HOST" ] || [ -z "${{ secrets.DEPLOY_USER }}" ] || [ -z "${{ secrets.DEPLOY_PATH }}" ] || [ -z "$DEPLOY_KEY" ]; then
+            echo "缺少部署所需的 secrets，已中止。"
+            exit 1
+          fi
+
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" | tr -d '\r' > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keygen -y -f ~/.ssh/id_rsa > /dev/null || {
+            echo "DEPLOY_KEY 不是有效的 SSH 私钥。"
+            exit 1
+          }
+
+          if [ -n "$DEPLOY_PORT" ]; then
+            ssh-keyscan -p "$DEPLOY_PORT" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          else
+            ssh-keyscan "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          fi
+
+      - name: 通过 rsync 部署到服务器
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DIST_DIR: ${{ inputs.dist-dir }}
+          BACKUP_COUNT: ${{ inputs.backup-count }}
+        run: |
+          RSYNC_SSH="ssh -i ~/.ssh/id_rsa -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no"
+          if [ -n "$DEPLOY_PORT" ]; then
+            RSYNC_SSH="ssh -i ~/.ssh/id_rsa -p $DEPLOY_PORT -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no"
+          fi
+
+          REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
+          BACKUP_DIR="/home/bak"
+
+          $RSYNC_SSH "$REMOTE" "echo ssh-ok" > /dev/null || {
+            echo "SSH 鉴权失败，请检查 DEPLOY_USER、DEPLOY_PORT、DEPLOY_HOST 及服务器 authorized_keys。"
+            exit 1
+          }
+
+          DEPLOY_DIR_NAME=$(basename "${DEPLOY_PATH}")
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          BACKUP_PATH="${BACKUP_DIR}/${DEPLOY_DIR_NAME}_${TIMESTAMP}"
+
+          echo "创建备份: $BACKUP_PATH"
+          $RSYNC_SSH "$REMOTE" "mkdir -p '$BACKUP_PATH' && cp -a '${DEPLOY_PATH}/.' '$BACKUP_PATH/' 2>/dev/null || true"
+
+          $RSYNC_SSH "$REMOTE" "cd '$BACKUP_DIR' && ls -dt ${DEPLOY_DIR_NAME}_* 2>/dev/null | tail -n +$((BACKUP_COUNT + 1)) | xargs rm -rf 2>/dev/null || true"
+
+          echo "开始部署到: ${DEPLOY_PATH}"
+          rsync -aO --checksum --no-perms --no-owner --delete \
+            --skip-compress=7z/avi/bz2/gz/jpeg/jpg/mkv/mov/mp3/mp4/pdf/png/rar/tgz/webm/webp/woff/woff2/zip \
+            --info=progress2,stats2 \
+            --exclude='.well-known' \
+            --filter='P .user.ini' \
+            -e "$RSYNC_SSH" \
+            "${DIST_DIR}/" "$REMOTE:${DEPLOY_PATH}" || {
+            echo "部署失败，尝试从备份恢复: $BACKUP_PATH"
+            $RSYNC_SSH "$REMOTE" "cp -a '$BACKUP_PATH/.' '${DEPLOY_PATH}/' 2>/dev/null || true"
+            exit 1
+          }
+
+          echo "部署成功完成"
