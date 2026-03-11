@@ -27,10 +27,6 @@ on:
         description: '保留备份数量'
         type: string
         default: '3'
-      deploy-path:
-        description: '服务器部署目标目录（每个仓库必须单独配置，为空则跳过部署）'
-        type: string
-        default: ''
     secrets:
       DEPLOY_HOST:
         required: true
@@ -38,6 +34,8 @@ on:
         required: true
       DEPLOY_KEY:
         required: true
+      DEPLOY_PATH:
+        required: false
       DEPLOY_PORT:
         required: false
 
@@ -75,13 +73,20 @@ jobs:
       - name: 构建
         run: ${{ inputs.build-command }}
 
-      - name: 跳过部署（deploy-path 未配置）
-        if: inputs.deploy-path == ''
+      - name: 检查 DEPLOY_PATH
+        id: check-deploy-path
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         run: |
-          echo "::warning::deploy-path 未配置，跳过部署步骤。请在调用方 workflow 的 with.deploy-path 中指定服务器目标目录。"
+          if [ -z "$DEPLOY_PATH" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::warning::DEPLOY_PATH 未配置，跳过部署步骤。请在仓库 Settings → Secrets → Actions 中添加 DEPLOY_PATH。"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: 准备 SSH 密钥
-        if: inputs.deploy-path != ''
+        if: steps.check-deploy-path.outputs.skip == 'false'
         env:
           DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -102,11 +107,11 @@ jobs:
           fi
 
       - name: 通过 rsync 部署到服务器
-        if: inputs.deploy-path != ''
+        if: steps.check-deploy-path.outputs.skip == 'false'
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_PATH: ${{ inputs.deploy-path }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
           DIST_DIR: ${{ inputs.dist-dir }}
           BACKUP_COUNT: ${{ inputs.backup-count }}
