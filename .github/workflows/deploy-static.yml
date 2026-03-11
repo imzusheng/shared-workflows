@@ -95,10 +95,6 @@ jobs:
           install -m 700 -d ~/.ssh
           printf '%s\n' "$DEPLOY_KEY" | tr -d '\r' > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keygen -y -f ~/.ssh/id_rsa > /dev/null || {
-            echo "DEPLOY_KEY 不是有效的 SSH 私钥。"
-            exit 1
-          }
 
           if [ -n "$DEPLOY_PORT" ]; then
             ssh-keyscan -p "$DEPLOY_PORT" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
