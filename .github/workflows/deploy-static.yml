@@ -42,6 +42,9 @@ on:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Checkout 代码
         uses: actions/checkout@v4
@@ -51,9 +54,13 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
           cache: ${{ inputs.package-manager }}
+          registry-url: https://npm.pkg.github.com
+          scope: '@imzusheng'
 
       - name: 安装依赖（npm）
         if: inputs.package-manager == 'npm'
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
         run: npm ci
 
       - name: 安装依赖（yarn）
