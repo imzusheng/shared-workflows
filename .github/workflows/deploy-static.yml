@@ -38,6 +38,8 @@ on:
         required: false
       DEPLOY_PORT:
         required: false
+      GH_PACKAGES_TOKEN:
+        required: false
 
 jobs:
   build-and-deploy:
@@ -60,7 +62,7 @@ jobs:
       - name: 安装依赖（npm）
         if: inputs.package-manager == 'npm'
         env:
-          NODE_AUTH_TOKEN: ${{ github.token }}
+          NODE_AUTH_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN || github.token }}
         run: npm ci
 
       - name: 安装依赖（yarn）
