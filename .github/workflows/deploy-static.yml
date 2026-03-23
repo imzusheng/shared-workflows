@@ -111,7 +111,9 @@ jobs:
           DEPLOY_PORT: ${{ inputs.deploy-port }}
         run: |
           install -m 700 -d ~/.ssh
-          printf '%s\n' "$DEPLOY_KEY" | tr -d '\r' > ~/.ssh/id_rsa
+          printf '%s
+' "$DEPLOY_KEY" | tr -d '
+' > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
 
           KEYSCAN_ARGS="-H"
@@ -141,8 +143,13 @@ jobs:
           REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
           BACKUP_DIR="/home/bak"
 
-          $RSYNC_SSH "$REMOTE" "echo ssh-ok" > /dev/null || {
-            echo "SSH 鉴权失败，请检查 deploy-user、deploy-port、deploy-host 及服务器 authorized_keys。"
+          SSH_TEST_ERR=$( $RSYNC_SSH "$REMOTE" "echo ssh-ok" 2>&1 ) || {
+            echo "::error::SSH 连接失败，错误详情: $SSH_TEST_ERR"
+            if echo "$SSH_TEST_ERR" | grep -qE "Connection reset|kex_exchange|Connection refused"; then
+              echo "::warning::可能原因: fail2ban 封禁了 runner IP，或服务器 MaxStartups 被打满。请在服务器上执行: fail2ban-client status sshd"
+            else
+              echo "::warning::可能原因: 密钥未加入 authorized_keys，或 deploy-user/deploy-host/deploy-port 配置有误。"
+            fi
             exit 1
           }
 
