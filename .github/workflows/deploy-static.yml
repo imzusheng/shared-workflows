@@ -111,14 +111,18 @@ jobs:
           DEPLOY_PORT: ${{ inputs.deploy-port }}
         run: |
           install -m 700 -d ~/.ssh
-          printf '%s\n' "$DEPLOY_KEY" | tr -d '\r' > ~/.ssh/id_rsa
+          printf '%s
+' "$DEPLOY_KEY" | tr -d '' > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
 
-          if [ -n "$DEPLOY_PORT" ]; then
-            ssh-keyscan -p "$DEPLOY_PORT" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
-          else
-            ssh-keyscan "$DEPLOY_HOST" >> ~/.ssh/known_hosts
-          fi
+          KEYSCAN_ARGS="-H"
+          [ -n "$DEPLOY_PORT" ] && KEYSCAN_ARGS="$KEYSCAN_ARGS -p $DEPLOY_PORT"
+          for i in 1 2 3; do
+            ssh-keyscan $KEYSCAN_ARGS "$DEPLOY_HOST" >> ~/.ssh/known_hosts && break
+            echo "keyscan 尝试 $i 失败，重试中..."
+            sleep $i
+          done
+          [ -s ~/.ssh/known_hosts ] || { echo "无法获取主机密钥，放弃部署"; exit 1; }
 
       - name: 通过 rsync 部署到服务器
         if: steps.check-deploy.outputs.skip == 'false'
