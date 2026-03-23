@@ -111,8 +111,7 @@ jobs:
           DEPLOY_PORT: ${{ inputs.deploy-port }}
         run: |
           install -m 700 -d ~/.ssh
-          printf '%s
-' "$DEPLOY_KEY" | tr -d '' > ~/.ssh/id_rsa
+          printf '%s\n' "$DEPLOY_KEY" | tr -d '\r' > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
 
           KEYSCAN_ARGS="-H"
