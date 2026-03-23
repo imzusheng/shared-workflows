@@ -27,18 +27,29 @@ on:
         description: '保留备份数量'
         type: string
         default: '3'
+      # 以下为新增的配置型 inputs
+      deploy-host:
+        description: '部署服务器地址'
+        type: string
+        default: ''
+      deploy-user:
+        description: 'SSH 登录用户'
+        type: string
+        default: 'root'
+      deploy-port:
+        description: 'SSH 端口'
+        type: string
+        default: '22'
+      deploy-path:
+        description: '部署路径'
+        type: string
+        default: ''
     secrets:
-      DEPLOY_HOST:
-        required: true
-      DEPLOY_USER:
-        required: true
       DEPLOY_KEY:
+        description: 'SSH 私钥'
         required: true
-      DEPLOY_PATH:
-        required: false
-      DEPLOY_PORT:
-        required: false
       GH_PACKAGES_TOKEN:
+        description: 'GitHub Packages Token'
         required: false
 
 jobs:
@@ -82,24 +93,22 @@ jobs:
       - name: 构建
         run: ${{ inputs.build-command }}
 
-      - name: 检查 DEPLOY_PATH
-        id: check-deploy-path
-        env:
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      - name: 检查部署配置
+        id: check-deploy
         run: |
-          if [ -z "$DEPLOY_PATH" ]; then
+          if [ -z "${{ inputs.deploy-host }}" ] || [ -z "${{ inputs.deploy-path }}" ]; then
             echo "skip=true" >> $GITHUB_OUTPUT
-            echo "::warning::DEPLOY_PATH 未配置，跳过部署步骤。请在仓库 Settings → Secrets → Actions 中添加 DEPLOY_PATH。"
+            echo "::warning::deploy-host 或 deploy-path 未配置，跳过部署步骤。"
           else
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
       - name: 准备 SSH 密钥
-        if: steps.check-deploy-path.outputs.skip == 'false'
+        if: steps.check-deploy.outputs.skip == 'false'
         env:
           DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_HOST: ${{ inputs.deploy-host }}
+          DEPLOY_PORT: ${{ inputs.deploy-port }}
         run: |
           install -m 700 -d ~/.ssh
           printf '%s\n' "$DEPLOY_KEY" | tr -d '\r' > ~/.ssh/id_rsa
@@ -112,12 +121,12 @@ jobs:
           fi
 
       - name: 通过 rsync 部署到服务器
-        if: steps.check-deploy-path.outputs.skip == 'false'
+        if: steps.check-deploy.outputs.skip == 'false'
         env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_HOST: ${{ inputs.deploy-host }}
+          DEPLOY_USER: ${{ inputs.deploy-user }}
+          DEPLOY_PATH: ${{ inputs.deploy-path }}
+          DEPLOY_PORT: ${{ inputs.deploy-port }}
           DIST_DIR: ${{ inputs.dist-dir }}
           BACKUP_COUNT: ${{ inputs.backup-count }}
         run: |
@@ -130,7 +139,7 @@ jobs:
           BACKUP_DIR="/home/bak"
 
           $RSYNC_SSH "$REMOTE" "echo ssh-ok" > /dev/null || {
-            echo "SSH 鉴权失败，请检查 DEPLOY_USER、DEPLOY_PORT、DEPLOY_HOST 及服务器 authorized_keys。"
+            echo "SSH 鉴权失败，请检查 deploy-user、deploy-port、deploy-host 及服务器 authorized_keys。"
             exit 1
           }
 
